@@ -1,0 +1,14 @@
+# Core (all scripts)
+pandas>=1.5
+numpy>=1.23
+matplotlib>=3.6
+openpyxl>=3.1          # .xlsx input/output
+
+# Map figures: Fig1/Script_Fig1.py, Note2/YieldPlot.py
+geopandas>=0.12
+fiona>=1.8
+shapely>=2.0
+
+# Supplementary Note 4 econometrics: Note4/
+linearmodels>=4.27
+scipy>=1.9
