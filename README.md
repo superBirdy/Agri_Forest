@@ -1,8 +1,8 @@
-# Agricultural Economic Responses to Forest Loss–Induced Ecoclimate Teleconnections
+# Agricultural Economic Responses to Ecoclimate Teleconnections Induced by Forest Loss
 
 Code and figure outputs supporting the manuscript
 
-> **“Agricultural Economic Responses to Forest Loss–Induced Ecoclimate Teleconnections”**
+> **“Agricultural Economic Responses to Ecoclimate Teleconnections Induced by Forest Loss”**
 
 The study evaluates how large-scale forest removal alters regional climate through
 ecoclimate teleconnections, and how those climate shifts propagate through U.S. crop
@@ -15,21 +15,21 @@ relative to the script, so the repo runs as-is after cloning.
 
 ## Repository structure
 
-- `Fig1/` – Figure 1: county yield-change maps (%). Also produces the absolute-change
+- `Fig1/` – Figures 1–3: county yield-change maps (%). Also produces the absolute-change
   maps in `FigS1-15/FigS3-5/`
-- `Fig2/` – Figure 2: national acreage and commodity quantity change
-- `Fig3/` – Figure 3: price and quantity index loss
-- `Fig4/` – Figure 4: welfare change by forest-loss region
-- `FigS1-15/` – Supplementary Figures S1–S15, one subfolder per figure group, plus
+- `Fig2/` – Figure 4: national acreage and commodity quantity change
+- `Fig3/` – Figure 5: price and quantity index loss
+- `Fig4/` – Figure 6: welfare change by forest-loss region
+- `FigS1-15/` – Supplementary Figures, one subfolder per figure group, plus
   additional crops shown for reference
 - `Note2/` – Supplementary Note 2: county yield-change maps (absolute and percent) for
   every crop × irrigation combination, including those not shown in the main text or SI
 - `Note4/` – Supplementary Note 4: the climate–crop-yield regression code and results
-- `Results_Fig2-4.xlsx` – model output for Figures 2–4 and S13–S15
+- `Results_Fig2-4.xlsx` – model output for Figures 4–6 and S13–S15
 - `requirements.txt`, `LICENSE`, `README.md`
 
-Scripts for S1–S2, S6–S8 and S12 are not included in this repository. S3–S5 come from
-`Fig1/Script_Fig1.py`; S9 comes from `FigS1-15/FigS10/YieldSEplot.py`; S11, S13, S14 and
+The script for S12 is not included in this repository. S3–S5 come from
+`Fig1/Script_Fig1.py`; S1–S2 and S6–S8 have a script in their own folder; S9 comes from `FigS1-15/FigS10/YieldSEplot.py`; S11, S13, S14 and
 S15 each have a script in their own folder.
 
 ---
@@ -61,7 +61,7 @@ python FigS1-15/FigS14/Script_Fig14_se.py
 python FigS1-15/FigS15/Script_Fig15_se.py
 ```
 
-`Fig1/Script_Fig1.py` and `Note2/YieldPlot.py` additionally need the boundary shapefiles
+The map scripts (`Fig1`, `FigS1-2`, `FigS6-8`, `Note2`) additionally need the boundary shapefiles
 (see below). `FigS1-15/FigS10/YieldSEplot.py` ships with its aggregated input, so the
 plotting half runs stand-alone; only the rebuild step at the top needs the raw
 per-scenario files.
@@ -73,7 +73,7 @@ your local copy and the script runs unchanged.
 
 | Constant | Script | What to supply |
 | --- | --- | --- |
-| `SHAPEFILE_DIR` | `Fig1/Script_Fig1.py`, `Note2/YieldPlot.py` | Folder holding `cb_2018_us_county_500k/` (US Census counties), `FASOM_NEON_Map/` (NEON domains) and `States_shapefile-shp/` (US states) |
+| `SHAPEFILE_DIR` | `Fig1/Script_Fig1.py`, `FigS1-15/FigS1-2/Script_FigS1-2.py`, `FigS1-15/FigS6-8/Script_FigS6-8.py`, `Note2/YieldPlot.py` | Folder holding `cb_2018_us_county_500k/` (US Census counties), `FASOM_NEON_Map/` (NEON domains), `States_shapefile-shp/` (US states) and `FASOM_subregion.shp` (FASOM regions) |
 | `SCENARIO_DIR` | `FigS1-15/FigS10/YieldSEplot.py` | Raw per-scenario regional forecast output |
 | `BASE_DIR` | `Note4/config.py` | County climate and yield panel, one `<crop>_merged.csv` per crop |
 
@@ -143,7 +143,7 @@ tonnes per hectare.
 
 ## Scenario codes
 
-Figures 2–4 and S13–S15 label the 14 forest-loss scenarios by region abbreviation, each
+Figures 4–6 and S13–S15 label the 14 forest-loss scenarios by region abbreviation, each
 mapping to a NEON domain in `Results_Fig2-4.xlsx`:
 
 `NE` 1 · `MA` 2 · `SE` 3 · `GL` 5 · `PP` 6 · `AP` 7 · `OZ` 8 · `NR` 12 · `SR` 13 ·

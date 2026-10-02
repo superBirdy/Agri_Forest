@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Agricultural Economic Responses to Ecoclimate Teleconnections Induced by Forest Loss"
+abstract: >-
+  Code and processed results for the analysis of how large-scale forest loss and
+  C3 grass replacement in 14 U.S. NEON regions affect crop yields, land
+  allocation, prices and agricultural welfare, linking CESM2 climate simulations
+  to econometric crop-yield models and the FASOM agricultural sector model.
+authors:
+  - family-names: Chen
+    given-names: Yayun
+  - family-names: Zhao
+    given-names: Lunyu C.
+  - family-names: Fei
+    given-names: Chengcheng J.
+  - family-names: McCarl
+    given-names: Bruce A.
+version: v1.0.0
+date-released: 2026-09-09
+license: MIT
+repository-code: "https://github.com/superBirdy/Agri_Forest"

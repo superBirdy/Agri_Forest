@@ -139,6 +139,11 @@ regtext={
     19	:'TA'  
     }
   
+
+import sys as _sys, pathlib as _pl
+_sys.path.insert(0, str(_pl.Path(__file__).resolve().parent.parent))   # repo root
+from map_extent_key import add_graticule, ALASKA_LON, ALASKA_LAT
+
 def plotneon(neon, md, title, legendname, filename):
     import numpy as np
     import math
@@ -191,7 +196,7 @@ def plotneon(neon, md, title, legendname, filename):
             return -10
         return int(math.floor(x/5)*5)
 
-    is_abs_plot = ("abs" in filename.lower()) or ("abs" in legendname.lower())
+    is_abs_plot = ("abs" in str(filename).lower()) or ("abs" in legendname.lower())
 
     if is_abs_plot:
         # ABSOLUTE CHANGE (t/ha) - symmetric scale, adaptive rounding.
@@ -228,7 +233,7 @@ def plotneon(neon, md, title, legendname, filename):
     # ============================================
     # create 5x3 layout
     # ============================================
-    fig = plt.figure(figsize=(12, 14), dpi=400)
+    fig = plt.figure(figsize=(10.08, 11.76), dpi=400)   # -> 215 x 177 mm page
 
     nrows, ncols = 5, 3
     panel_w = 0.8 / ncols
@@ -252,10 +257,6 @@ def plotneon(neon, md, title, legendname, filename):
         # ============================================
         if s == "BLANK_PANEL":
 
-            ax.set_xlim(x0, x1)
-            ax.set_ylim(y0, y1)
-            ax.set_aspect("equal")
-
             cax = fig.add_axes([
                 left + 0.02,
                 bottom + 0.05,
@@ -270,8 +271,8 @@ def plotneon(neon, md, title, legendname, filename):
             sm._A = []
 
             cbar = plt.colorbar(sm, cax=cax, orientation="horizontal", ticks=bounds)
-            cbar.ax.tick_params(labelsize=10)
-            cbar.set_label(legendname, fontsize=10)
+            cbar.ax.tick_params(labelsize=8.5)
+            cbar.set_label(legendname, fontsize=8.5)
             continue
 
         # ============================================
@@ -280,7 +281,7 @@ def plotneon(neon, md, title, legendname, filename):
         regnumber = int(s.split("_")[1])
         neon1 = neon[neon.DomainID == regnumber]
 
-        map_df.plot(ax=ax, facecolor="none", edgecolor="none")
+        map_df.plot(ax=ax, facecolor="none", edgecolor="none", rasterized=True)
 
         md.plot(
             ax=ax,
@@ -288,7 +289,8 @@ def plotneon(neon, md, title, legendname, filename):
             cmap=newcmp,
             vmin=vmin, vmax=vmax,
             edgecolor="none",
-            linewidth=0
+            linewidth=0,
+            rasterized=True          # keeps the vector PDF small; text stays editable
         )
 
         state_df.plot(
@@ -313,10 +315,16 @@ def plotneon(neon, md, title, legendname, filename):
         ax.set_xlim(x0, x1)
         ax.set_ylim(y0, y1)
         ax.set_aspect("equal")
+        # numbers only on the left column and on the bottom panel of each
+        # column; every other panel keeps the tick marks alone
+        add_graticule(ax, fs=6,
+                      lat_labels=(col == 0),
+                      lon_labels=(i + 3 >= len(ordered)
+                                  or ordered[i + 3] == "BLANK_PANEL"))
 
         # Alaska inset
         if regnumber == 19:
-            ins = ax.inset_axes([0.00, -0.22, 0.35, 0.35])
+            ins = ax.inset_axes([0.00, -0.52, 0.35, 0.35])
             ins.axis("off")
             ins.set_xlim(-172, -135)
             ins.set_ylim(53, 73)
@@ -328,13 +336,15 @@ def plotneon(neon, md, title, legendname, filename):
                 linewidth=3,
                 path_effects=[pe.Stroke(linewidth=3, foreground="black", alpha=0.6), pe.Normal()]
             )
+            add_graticule(ins, lon_ticks=ALASKA_LON, lat_ticks=ALASKA_LAT,
+                          fs=6, length=1.5)
 
         # Scenario label
         ax.text(
             0.02, 1.05,
             regtext[regnumber],
             transform=ax.transAxes,
-            fontsize=12,
+            fontsize=10,
             ha="left", va="bottom"
         )
 
@@ -441,6 +451,9 @@ abs_csv = REPO_ROOT / "FigS1-15" / "FigS3-5" / "crop_yield_change_abs.csv"
 # =====================================
 # 2. LOAD PCT DATA
 # =====================================
+if not abs_csv.exists():
+    print("[SKIP] %s not present - Fig S3-5 block skipped" % abs_csv)
+    raise SystemExit(0)
 abs_df = pd.read_csv(abs_csv)
 
 # --- UNIFIED conversion: native units -> t/ha (abs only; pct is a ratio) ---
