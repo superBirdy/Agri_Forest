@@ -10,13 +10,8 @@ abstract: >-
 authors:
   - family-names: Chen
     given-names: Yayun B.
-  - family-names: Zhao
-    given-names: Lunyu C.
-  - family-names: Fei
-    given-names: Chengcheng J.
-  - family-names: McCarl
-    given-names: Bruce A.
 version: v1.1.0
-date-released: 2026-10-03
+date-released: 2026-10-06
 license: MIT
 repository-code: "https://github.com/superBirdy/Agri_Forest"
+doi: 10.5281/zenodo.22680016
