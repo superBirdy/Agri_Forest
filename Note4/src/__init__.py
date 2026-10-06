@@ -50,8 +50,8 @@ REPORT_DIR.mkdir(parents=True, exist_ok=True)
 # MODEL SPECIFICATION SETTINGS
 # ============================================================
 
-# Time trend specifications to evaluate
-TRENDS = ["linear", "log", "quad"]
+# Time trend specification (quadratic, as in the paper)
+TRENDS = ["quad"]
 
 # Number of bootstrap replications
 N_BOOT = int(os.getenv("CLIMATE_N_BOOT", 200))

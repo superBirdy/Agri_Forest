@@ -10,8 +10,8 @@ Selection rule:
      literature-justified.
   3. Among those, pick the LOWEST cross-validated MSE.
 
-Anchors come from the `Reference_Range` tab of
-`data/Reference_Range.xlsx`, with per-crop overrides below.
+Anchors come from the `Reference_Range` tab of `data/Reference_Range.xlsx`:
+one row per crop, or one row per crop x irr where the `irr` column is filled.
 """
 
 import os
@@ -20,24 +20,12 @@ import pandas as pd
 
 from config import DATA_DIR, ANCHOR_TOL, EXCEPTION_NOGDD
 
-# Anchor overrides (cool-season crops the sprouting tab anchors poorly).
-# Keys are either a crop name, or a (crop, irr) tuple for irr-specific anchors.
-#   fall oats grow cool -> 4/16 germination band; northern durum/spring wheat -> 4/20.
-# NOTE: winter wheat is handled in the Reference_Range tab itself (re-anchored to the
-#       cool band -9/10), so the selected irr1 (-8/8) and irr2 (-10/12) fall within +/-3.
-ANCHOR_OVERRIDE = {
-    "oats_fall":    (4.0, 16.0, np.nan),
-    "wheat_durum":  (4.0, 20.0, np.nan),
-    "wheat_spring": (4.0, 20.0, np.nan),
-    "desert_durum": (15.0, 25.0, np.nan),
-    "rice":         (10.0, 31.0, np.nan),
-}
-
 _REF_CACHE = None
 
 
 def _load_reference_anchors():
-    """Read (GDD_base, Upper_suitable, Freeze) per crop from the Reference_Range tab."""
+    """Read (GDD_base, Upper_suitable, Freeze) per (crop, irr) from the Reference_Range tab.
+    irr is None for rows that apply to both irrigation types."""
     global _REF_CACHE
     if _REF_CACHE is not None:
         return _REF_CACHE
@@ -61,22 +49,23 @@ def _load_reference_anchors():
                 return float(x)
             except Exception:
                 return np.nan
-        ref = {r.k: (num(r.GDD_base_C), num(r.Upper_suitable_C), num(r.FreezeVal))
-               for r in rt.itertuples()}
+        irr_col = rt["irr"] if "irr" in rt.columns else pd.Series(np.nan, index=rt.index)
+        ref = {(r.k, None if pd.isna(i) else int(i)):
+               (num(r.GDD_base_C), num(r.Upper_suitable_C), num(r.FreezeVal))
+               for r, i in zip(rt.itertuples(), irr_col)}
     except Exception as e:
-        print(f"  (Reference_Range tab not read: {e}; using overrides only)")
+        print(f"  (Reference_Range tab not read: {e})")
     _REF_CACHE = ref
     return ref
 
 
 def anchors_for(crop, irr=None):
-    """Anchor (low, high, freeze): (crop, irr) override > crop override > Reference_Range."""
+    """Anchor (low, high, freeze): the (crop, irr) row if present, else the crop row."""
     k = str(crop).strip().lower()
-    if irr is not None and (k, int(irr)) in ANCHOR_OVERRIDE:
-        return ANCHOR_OVERRIDE[(k, int(irr))]
-    if k in ANCHOR_OVERRIDE:
-        return ANCHOR_OVERRIDE[k]
-    return _load_reference_anchors().get(k, (np.nan, np.nan, np.nan))
+    ref = _load_reference_anchors()
+    if irr is not None and (k, int(irr)) in ref:
+        return ref[(k, int(irr))]
+    return ref.get((k, None), (np.nan, np.nan, np.nan))
 
 
 def select_inrange(models_df, terms_df, crop=None, irr=None,

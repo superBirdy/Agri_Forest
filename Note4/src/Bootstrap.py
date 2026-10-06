@@ -4,6 +4,13 @@
 Created on Wed Sep 17 19:22:00 2025
 
 @author: yayun.chen
+
+County cluster bootstrap for the selected yield model (Supplementary Fig. 11).
+
+Each draw resamples n counties WITH replacement (full-size pairs cluster
+bootstrap); a county drawn more than once enters the panel as distinct
+entities. The model is re-fit on the resampled panel and the area-weighted
+national mean of the FE-inclusive predictions (Xb + a_i) is recorded.
 """
 
 
@@ -17,9 +24,9 @@ pd.set_option('display.max_columns', None)
 
 
 
-def run_wild_bootstrap_once(
+def run_cluster_bootstrap_once(
     crop, irr_num, raw_sub, best_model, model_terms,
-    n_boot=50, seed=42, wild_dist="rademacher", verbose=True,
+    n_boot=500, seed=42, verbose=True,
     save_draws_path=None
 ):
 
@@ -41,30 +48,19 @@ def run_wild_bootstrap_once(
             return None
         return min(vals, key=lambda v: abs(v - target))
 
-    def _wild_weights(n, dist="rademacher", rng=None):
-        if rng is None:
-            rng = np.random.default_rng()
-        if dist == "rademacher":
-            return rng.choice([-1, 1], size=n)
-        elif dist == "normal":
-            return rng.standard_normal(n)
-        elif dist == "mammen":
-            phi = np.sqrt(5)
-            w1, w2 = (1 - phi) / 2, (1 + phi) / 2
-            p1 = (phi + 1) / (2 * phi)
-            mask = rng.random(n) < p1
-            out = np.empty(n)
-            out[mask] = w1
-            out[~mask] = w2
-            return out
-        else:
-            raise ValueError(f"Unknown wild dist: {dist}")
+    def _empty():
+        return pd.DataFrame([{
+            "crop": f"{crop}_irr{irr_num}", "model_id": model_id, "timetrend": timetrend,
+            "mean_pred": np.nan, "std_b_mean": np.nan,
+            "ci_lo": np.nan, "ci_hi": np.nan, "ci_lo_pct": np.nan, "ci_hi_pct": np.nan,
+            "n_success": 0, "n_boot": int(n_boot)
+        }])
 
     rng = np.random.default_rng(seed)
 
     # ----- model settings ----------------------------------------------------
     model_id  = _safe_int(best_model.get("model_id"), 0)
-    timetrend = best_model.get("timetrend", "linear")
+    timetrend = best_model.get("timetrend", "quad")
     lowhere   = _safe_int(best_model.get("low"),   None)
     highhere  = _safe_int(best_model.get("high"),  None)
 
@@ -73,41 +69,22 @@ def run_wild_bootstrap_once(
     if verbose:
         print(f"[INFO] Boot model_id={model_id} trend={timetrend} terms={req_terms}")
 
-    # ----- process data ------------------------------------------------------
-    cyr = ClimateCropYield(crop, irr_num, raw_sub)
-    df  = cyr.DataProcess().copy()
-    if df is None or df.empty:
-        return pd.DataFrame([{
-            "crop": f"{crop}_irr{irr_num}", "model_id": model_id, "timetrend": timetrend,
-            "mean_pred": np.nan, "ci_lo": np.nan, "ci_hi": np.nan,
-            "n_success": 0, "n_boot": int(n_boot)
-        }])
+    # ----- data (as in the published run: irrigation subset of the raw panel) ---
+    df = raw_sub.copy()
+    if "irr" in df.columns:
+        df = df[df["irr"] == irr_num].copy()
+    if "YIELD" not in df.columns:
+        ycols = [c for c in df.columns if c.lower() == "yield"]
+        if ycols:
+            df = df.rename(columns={ycols[0]: "YIELD"})
+    if df.empty or "YIELD" not in df.columns:
+        return _empty()
 
-    # degree-day bins
-    dday_cols  = [c for c in df.columns if c.startswith("dday")]
-    dday_vals  = [_safe_int(c.replace("dday", ""), None) for c in dday_cols]
-    dday_vals  = [v for v in dday_vals if v is not None]
-
-    low_sel    = _nearest(dday_vals, lowhere)   if ("GDD" in req_terms or "HDD" in req_terms) else None
-    high_sel   = _nearest(dday_vals, highhere)  if ("GDD" in req_terms or "HDD" in req_terms) else None
-
-    GDDcol = f"dday{low_sel}"  if low_sel  is not None and "GDD" in req_terms else None
-    HDDcol = f"dday{high_sel}" if high_sel is not None and "HDD" in req_terms else None
-    if verbose:
-        print(f"[DEBUG] Columns: GDD={GDDcol}, HDD={HDDcol}")
-
-    # construct required variables (only those requested)
-    if "GDD" in req_terms and GDDcol:
-        if "HDD" in req_terms and HDDcol:
-            df["GDD"] = df[GDDcol] - df[HDDcol]
-            df["HDD"] = df[HDDcol]
-        else:
-            df["GDD"] = df[GDDcol]
-    if "HDD" in req_terms and HDDcol and "HDD" not in df.columns:
-        df["HDD"] = df[HDDcol]
+    df["fips"] = df["fips"].astype(str)
+    df["year"] = df["year"].astype(int)
 
     # time trend columns
-    df["year"] = df["year"].astype(int)
+    df["year1"] = df["year"]
     if timetrend == "log":
         df["yearlog"] = np.log(df["year"]); df = df.drop(columns=["year2"], errors="ignore")
     elif timetrend == "quad":
@@ -115,122 +92,92 @@ def run_wild_bootstrap_once(
     else:
         df = df.drop(columns=["year2", "yearlog"], errors="ignore")
 
-    # panel index
-    df["fips"] = df["fips"].astype(str)
-    df = df.sort_values(["fips","year"]).set_index(["fips","year"])
+    # degree-day terms: GDD = dday(low) - dday(high), HDD = dday(high)
+    if ("GDD" in req_terms or "HDD" in req_terms) and lowhere is not None and highhere is not None:
+        dday_vals = [_safe_int(c.replace("dday", ""), None) for c in df.columns if c.startswith("dday")]
+        dday_vals = [v for v in dday_vals if v is not None]
+        low_sel, high_sel = _nearest(dday_vals, lowhere), _nearest(dday_vals, highhere)
+        if verbose:
+            print(f"[DEBUG] Columns: GDD=dday{low_sel}-dday{high_sel}, HDD=dday{high_sel}")
+        if "GDD" in req_terms:
+            df["GDD"] = df[f"dday{low_sel}"] - df[f"dday{high_sel}"]
+        df["HDD"] = df[f"dday{high_sel}"]
 
-    # regressors present
+    # estimation matrix
     X_terms = [t for t in req_terms if t in df.columns]
-    X_terms = list(dict.fromkeys(X_terms))
     if not X_terms:
-        return pd.DataFrame([{
-            "crop": f"{crop}_irr{irr_num}", "model_id": model_id, "timetrend": timetrend,
-            "mean_pred": np.nan, "ci_lo": np.nan, "ci_hi": np.nan,
-            "n_success": 0, "n_boot": int(n_boot)
-        }])
+        return _empty()
+    df = df.sort_values(["fips", "year"]).set_index(["fips", "year"])
+    need_cols = ["YIELD"] + X_terms + (["AREA_HARVESTED"] if "AREA_HARVESTED" in df.columns else [])
+    dfc = df[need_cols].copy().dropna()
 
-    # estimation matrices
-    y = df["YIELD"].astype(float)
-    X = df[X_terms].apply(pd.to_numeric, errors="coerce")
-    dfc = pd.concat([y.rename("YIELD"), X], axis=1).dropna()
-    y_c, X_c = dfc["YIELD"], dfc[X_terms]
-
-    # ----- base fit ----------------------------------------------------------
-    if verbose: print("[INFO] Fitting base model...")
-    base_res = PanelOLS(y_c, X_c, entity_effects=True).fit(cov_type="clustered", cluster_entity=True)
-    if verbose: print("[INFO] Base fit done.")
-
-    # fitted Xβ (no FE in your env)
-    fv = base_res.fitted_values
-    if isinstance(fv, pd.Series):
-        xb = fv.rename("xb").reset_index()
-    else:
-        xb = fv.reset_index().rename(columns={fv.columns[0]: "xb"})
-    if "entity" in xb and "fips" not in xb: xb = xb.rename(columns={"entity": "fips"})
-    if "time"   in xb and "year" not in xb: xb = xb.rename(columns={"time": "year"})
-    xb["fips"] = xb["fips"].astype(str); xb["year"] = xb["year"].astype(int)
-
-    # entity FE (α_i), one per fips
-    ef = base_res.estimated_effects
-    if isinstance(ef, pd.Series):
-        fe_df = ef.to_frame("fixed_effect").reset_index()
-    else:
-        col = ef.columns[0] if hasattr(ef, "columns") else "fixed_effect"
-        fe_df = ef.reset_index().rename(columns={col: "fixed_effect"})
-    if "entity" in fe_df and "fips" not in fe_df: fe_df = fe_df.rename(columns={"entity": "fips"})
-    fe_df["fips"] = fe_df["fips"].astype(str)
-    fe_one = fe_df.groupby("fips", as_index=False)["fixed_effect"].mean()
-
-    # join: yhat_withFE = Xβ + α_i
-    xb_fe = xb.merge(fe_one, on="fips", how="left")
-    xb_fe["fixed_effect"] = xb_fe["fixed_effect"].fillna(0.0)
-    xb_fe["yhat_withFE"]  = xb_fe["xb"] + xb_fe["fixed_effect"]
-
-    # align to MultiIndex order of y_c
-    yhat_withFE = xb_fe.set_index(["fips","year"])["yhat_withFE"].reindex(y_c.index)
-    resid = y_c - yhat_withFE  # residuals against full fitted values (Xβ + α_i)
-
-    # weights for aggregation
-    if "AREA_HARVESTED" in df.columns:
-        w_df = (
-            df.reset_index()[["fips","year","AREA_HARVESTED"]]
-              .groupby(["fips","year"], as_index=False)["AREA_HARVESTED"].sum()
-        )
-    else:
-        w_df = xb_fe[["fips","year"]].copy()
-        w_df["AREA_HARVESTED"] = np.nan
+    # county clusters: integer row positions per county, computed once
+    fips_list  = dfc.index.get_level_values("fips").unique().to_numpy()
+    n_entities = len(fips_list)
+    fips_idx   = dfc.index.get_level_values("fips").to_numpy()
+    year_idx   = dfc.index.get_level_values("year").to_numpy()
+    cluster_rows = {f: np.where(fips_idx == f)[0] for f in fips_list}
 
     # ----- bootstrap loop ----------------------------------------------------
-    draws = []
-    if verbose: print(f"[INFO] Wild bootstrap: n_boot={n_boot}, dist={wild_dist}")
+    draws, stds = [], []
+    if verbose: print(f"[INFO] County cluster bootstrap: n_boot={n_boot}, counties={n_entities}")
     for b in range(n_boot):
         try:
-            w = _wild_weights(len(resid), dist=wild_dist, rng=rng)
-            # y* = (Xβ + α_i) + ε*w
-            y_star = pd.Series(
-                yhat_withFE.values + resid.values * w,
-                index=y_c.index, name="YIELD"
-            )
+            # draw n counties with replacement; relabel so duplicates are distinct entities
+            sampled = rng.choice(n_entities, size=n_entities, replace=True)
+            pos_parts, ent_parts = [], []
+            for new_id, ci in enumerate(sampled):
+                pos = cluster_rows[fips_list[ci]]
+                pos_parts.append(pos)
+                ent_parts.append(np.full(len(pos), new_id))
+            row_pos = np.concatenate(pos_parts)
+            new_ent = np.concatenate(ent_parts).astype(str)
+            boot_df = dfc.iloc[row_pos].copy()
+            boot_df.index = pd.MultiIndex.from_arrays(
+                [new_ent, year_idx[row_pos]], names=["fips", "year"])
 
-            # re-fit on y_star
-            res_star = PanelOLS(y_star, X_c, entity_effects=True).fit(
+            res_star = PanelOLS(boot_df["YIELD"], boot_df[X_terms], entity_effects=True).fit(
                 cov_type="clustered", cluster_entity=True
             )
 
-            # Xβ* (no FE) for each fips-year
+            # fitted_values is Xb only (no entity effects) in linearmodels
             fv_star = res_star.fitted_values
-            if isinstance(fv_star, pd.Series):
-                xb_b = fv_star.rename("pred_noFE").reset_index()
-            else:
-                xb_b = fv_star.reset_index().rename(columns={fv_star.columns[0]: "pred_noFE"})
-            if "entity" in xb_b and "fips" not in xb_b: xb_b = xb_b.rename(columns={"entity": "fips"})
-            if "time"   in xb_b and "year" not in xb_b: xb_b = xb_b.rename(columns={"time": "year"})
-            xb_b["fips"] = xb_b["fips"].astype(str); xb_b["year"] = xb_b["year"].astype(int)
+            xb_b = fv_star.rename("xb").reset_index() if isinstance(fv_star, pd.Series) \
+                   else fv_star.reset_index().rename(columns={fv_star.columns[0]: "xb"})
+            xb_b = xb_b.rename(columns={"entity": "fips", "time": "year"})
+            xb_b["fips"], xb_b["year"] = xb_b["fips"].astype(str), xb_b["year"].astype(int)
 
-            # α_i* from bootstrap fit (per fips)
+            # a_i* (one per resampled entity)
             ef_b = res_star.estimated_effects
             if isinstance(ef_b, pd.Series):
                 fe_b = ef_b.to_frame("fixed_effect").reset_index()
             else:
                 colb = ef_b.columns[0] if hasattr(ef_b, "columns") else "fixed_effect"
                 fe_b = ef_b.reset_index().rename(columns={colb: "fixed_effect"})
-            if "entity" in fe_b and "fips" not in fe_b: fe_b = fe_b.rename(columns={"entity":"fips"})
+            fe_b = fe_b.rename(columns={"entity": "fips"})
             fe_b["fips"] = fe_b["fips"].astype(str)
             fe_b = fe_b.groupby("fips", as_index=False)["fixed_effect"].mean()
 
-            # pred_withFE* = Xβ* + α_i*
+            # pred_withFE* = Xb* + a_i*
             pred_b = xb_b.merge(fe_b, on="fips", how="left")
             pred_b["fixed_effect"] = pred_b["fixed_effect"].fillna(0.0)
-            pred_b["pred_withFE"]  = pred_b["pred_noFE"] + pred_b["fixed_effect"]
+            pred_b["pred_withFE"]  = pred_b["xb"] + pred_b["fixed_effect"]
 
-            # weights & national aggregate
-            pred_b = pred_b.merge(w_df, on=["fips","year"], how="left")
-            if pred_b["AREA_HARVESTED"].notna().any() and pred_b["AREA_HARVESTED"].sum() > 0:
-                nat_b = float(np.average(pred_b["pred_withFE"], weights=pred_b["AREA_HARVESTED"]))
+            # area-weighted national aggregate (and cross-county spread)
+            if "AREA_HARVESTED" in boot_df.columns:
+                w_tbl = boot_df.reset_index()[["fips", "year", "AREA_HARVESTED"]]
+                pred_b = pred_b.merge(w_tbl, on=["fips", "year"], how="left")
+            if "AREA_HARVESTED" in pred_b.columns and pred_b["AREA_HARVESTED"].sum() > 0:
+                vals = pred_b["pred_withFE"].to_numpy()
+                wts  = np.nan_to_num(pred_b["AREA_HARVESTED"].to_numpy())
+                nat_b = float(np.average(vals, weights=wts))
+                std_b = float(np.sqrt(np.average((vals - nat_b) ** 2, weights=wts)))
             else:
                 nat_b = float(pred_b["pred_withFE"].mean())
+                std_b = float(pred_b["pred_withFE"].std())
 
             draws.append(nat_b)
+            stds.append(std_b)
             if verbose and b < 200:
                 print(f"[BOOT {b:02d}] nat={nat_b:.4f}")
 
@@ -238,20 +185,35 @@ def run_wild_bootstrap_once(
             if verbose:
                 print(f"[FAIL {b:02d}] {type(e).__name__}: {e}")
 
-    arr = np.array(draws, dtype=float)
+    arr_nat = np.array(draws, dtype=float)
+    arr_std = np.array(stds, dtype=float)
 
     # optional: save per-draws
-    if save_draws_path and len(arr):
-        pd.DataFrame({"draw": np.arange(len(arr)), "nat_pred": arr}).to_csv(save_draws_path, index=False)
+    if save_draws_path and len(arr_nat):
+        pd.DataFrame({"draw": np.arange(len(arr_nat)), "nat_pred": arr_nat,
+                      "std_pred": arr_std}).to_csv(save_draws_path, index=False)
+
+    if not len(arr_nat):
+        return _empty()
+
+    mean_nat   = float(np.nanmean(arr_nat))
+    std_on_nat = float(np.nanmean(arr_std))
+    ci_lo_pct, ci_hi_pct = (float(v) for v in np.nanpercentile(arr_nat, [2.5, 97.5]))
 
     return pd.DataFrame([{
         "crop": f"{crop}_irr{irr_num}",
         "model_id": model_id,
         "timetrend": timetrend,
-        "mean_pred": np.nanmean(arr) if len(arr) else np.nan,
-        "ci_lo": np.nanpercentile(arr, 2.5) if len(arr) else np.nan,
-        "ci_hi": np.nanpercentile(arr, 97.5) if len(arr) else np.nan,
-        "n_success": int(len(arr)),
+        "mean_pred": mean_nat,
+        "std_b_mean": std_on_nat,
+        # ci_lo/ci_hi: mean +/- 1.96 x mean cross-county SD of predictions
+        # (the interval plotted in Supplementary Fig. 11)
+        "ci_lo": mean_nat - 1.96 * std_on_nat,
+        "ci_hi": mean_nat + 1.96 * std_on_nat,
+        # percentile interval of the national mean across bootstrap draws
+        "ci_lo_pct": ci_lo_pct,
+        "ci_hi_pct": ci_hi_pct,
+        "n_success": int(len(arr_nat)),
         "n_boot": int(n_boot)
     }])
 

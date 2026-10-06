@@ -41,11 +41,11 @@ REPORT_DIR.mkdir(parents=True, exist_ok=True)
 # Model settings  (REVISED - 2nd-round review)
 # ------------------------------------------------------------
 
-# Headline time trend is QUADRATIC (year1 + year2); linear/log kept for the search.
-TRENDS = ["linear", "log", "quad"]
+# Time trend is QUADRATIC (year1 + year2), the only trend used in the paper.
+TRENDS = ["quad"]
 
 # Concern 1.2: full-sample county CLUSTER bootstrap with replacement, percentile CI.
-N_BOOT = 500           # was 200 (wild bootstrap); revised to 500-draw cluster bootstrap
+N_BOOT = 500           # 500-draw county cluster bootstrap (src/Bootstrap.py)
 SEED = 42
 ALPHA = 0.05           # kept for reporting only; NOT used to select models anymore
 

@@ -172,10 +172,10 @@ class ClimateCropYield:
         return self._train
     
     
-    def FE_Models_MSE(self, hightemp, lowtemp, timetrend='linear', drop_prec=False, return_results=False):
+    def FE_Models_MSE(self, hightemp, lowtemp, timetrend='quad', drop_prec=False, return_results=False):
         """
-        Grid search over ALL model specifications:
-          - timetrend: linear, quad, log
+        Grid search over model specifications for ONE time trend:
+          - timetrend: the trend passed in (linear, quad or log; the paper uses quad)
           - precip: with or without
           - PI_5: with or without (irr=2 only)
           - irrigation: handled via self.irr
@@ -194,8 +194,9 @@ class ClimateCropYield:
         dday_vals  = [_safe_int(c.replace('dday','')) for c in dday_cols]
         dday_vals  = [v for v in dday_vals if v is not None]
     
-        # === LOOP over ALL model specifications ===
-        for timetrend in ["linear", "quad", "log"]:
+        # === LOOP over model specifications (the requested trend only;
+        #     run_crop_one_irr loops over trends) ===
+        for timetrend in [timetrend]:
             for drop_prec in [False, True]:
                 for drop_pi5 in [False, True]:
                     # Skip invalid combos
@@ -277,7 +278,9 @@ class ClimateCropYield:
                                 
                                     preds["fips"] = preds["fips"].astype(str)
                                     preds = preds.merge(fe_one, on="fips", how="left")
-                                    preds["estimated_effects"] = preds["estimated_effects"].fillna(0.0)
+                                    # Drop test-year counties with no training fixed effect:
+                                    # there is no entity effect to forecast them with.
+                                    preds = preds[preds["estimated_effects"].notna()].copy()
                                     preds["pred_withFE"] = preds["pred_noFE"] + preds["estimated_effects"]
                                 
                                     # --- 4. Actuals
@@ -291,9 +294,9 @@ class ClimateCropYield:
                                 
                                 mseavg = float(np.mean(mse_list)) if mse_list else np.nan
     
-                                # Fit full model
+                                # Fit full model (standard errors clustered by county)
                                 mdl = PanelOLS.from_formula(formula, data=datareg)
-                                res = mdl.fit()
+                                res = mdl.fit(cov_type="clustered", cluster_entity=True)
     
                                 model_id += 1
                                 model_rows.append({
@@ -527,10 +530,11 @@ def run_crop_one_irr(
     # 1. Load temperature thresholds
     # ------------------------------------------------------------
 
-    # Anchors come from the single reference table, data/Reference_Range.xlsx:
-    # GDD_base_C is the germination/base anchor, Upper_suitable_C the heat-onset
-    # anchor. They centre the threshold grid search below and, with ANCHOR_TOL,
-    # define the in-range window used in src/Model_Selection.py.
+    # data/Reference_Range.xlsx (one row per crop, or per crop x irr when `irr`
+    # is filled): Search_low_C / Search_high_C centre the threshold grid search
+    # below (low-10..low+5, high-10..high+5); GDD_base_C / Upper_suitable_C are
+    # the anchors that, with ANCHOR_TOL, define the in-range window used in
+    # src/Model_Selection.py.
     # NOTE: lowercase "data" - required on case-sensitive file systems (Linux/macOS)
     thresh_path = os.path.join(
         project_dir,
@@ -543,20 +547,16 @@ def run_crop_one_irr(
         return None
 
     tt = pd.read_excel(thresh_path, sheet_name="Reference_Range")
-    tt = tt.rename(columns={
-        "GDD_base_C": "lowtemp",
-        "Upper_suitable_C": "hightemp"
-    })
-
     tt["Crop_clean"] = tt["Crop"].astype(str).str.strip().str.lower()
-    row = tt.loc[tt["Crop_clean"] == crop_name.lower()]
+    row = tt.loc[(tt["Crop_clean"] == crop_name.lower())
+                 & (tt["irr"].isna() | (tt["irr"] == irr_num))]
 
     if row.empty:
-        print(f"[WARN] No reference range found for crop {crop_name}")
+        print(f"[WARN] No reference range found for crop {crop_name}, irr={irr_num}")
         return None
 
-    hightemp = int(row["hightemp"].iloc[0])
-    lowtemp  = int(row["lowtemp"].iloc[0])
+    hightemp = int(row["Search_high_C"].iloc[0])
+    lowtemp  = int(row["Search_low_C"].iloc[0])
 
     # ------------------------------------------------------------
     # 2. Load merged crop dataset
@@ -611,11 +611,15 @@ def run_crop_one_irr(
                 drop_prec=False
             )
 
-            if terms_df is not None and not terms_df.empty:
-                all_terms_list.append(terms_df)
-
+            # model_id restarts at 1 in every call: offset terms and models
+            # together so ids stay unique and aligned across trends
             if models_df is not None and not models_df.empty:
+                offset = sum(len(m) for m in all_models_list)
+                models_df["model_id"] += offset
                 all_models_list.append(models_df)
+                if terms_df is not None and not terms_df.empty:
+                    terms_df["model_id"] += offset
+                    all_terms_list.append(terms_df)
 
         except Exception as e:
             print(f"[WARN] Model estimation failed ({mt}): {e}")
@@ -631,9 +635,6 @@ def run_crop_one_irr(
 
     all_terms  = pd.concat(all_terms_list,  ignore_index=True) if all_terms_list else pd.DataFrame()
     all_models = pd.concat(all_models_list, ignore_index=True)
-
-    all_models = all_models.reset_index(drop=True)
-    all_models["model_id"] = np.arange(1, len(all_models) + 1)
 
     # ------------------------------------------------------------
     # 7. Save regression results (Excel)

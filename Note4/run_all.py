@@ -8,7 +8,7 @@ Created on Wed Sep 17 19:22:00 2025
 
 from src.Climate_model import ClimateCropYield, run_crop_one_irr
 from src.Model_Selection import select_best, select_inrange
-from src.Bootstrap import run_wild_bootstrap_once
+from src.Bootstrap import run_cluster_bootstrap_once
 from src.Reporting import export_models_html_no_bootstrap
 import os
 import sys
@@ -76,9 +76,9 @@ def run_all():
 
                     best_model = best_models.iloc[0]
 
-                    print("-> Running wild bootstrap (national aggregate)...")
+                    print("-> Running county cluster bootstrap (national aggregate)...")
 
-                    ci_df = run_wild_bootstrap_once(
+                    ci_df = run_cluster_bootstrap_once(
                         crop=crop_name,
                         irr_num=irr,
                         raw_sub=sub_data,
